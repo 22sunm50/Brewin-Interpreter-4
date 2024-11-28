@@ -27,9 +27,6 @@ class Interpreter(InterpreterBase):
         self.trace_output = trace_output
         self.__setup_ops()
 
-    # run a program that's provided in a string
-    # usese the provided Parser found in brewparse.py to parse the program
-    # into an abstract syntax tree (ast)
     def run(self, program):
         ast = parse_program(program)
         self.__set_up_function_table(ast)
@@ -184,6 +181,18 @@ class Interpreter(InterpreterBase):
             return self.__eval_unary(expr_ast, Type.BOOL, lambda x: not x)
 
     def __eval_op(self, arith_ast):
+        op = arith_ast.elem_type
+        if op  == '&&':
+            left_value_obj = self.__eval_expr(arith_ast.get("op1"))
+            if not left_value_obj.value():
+                return Value(Type.BOOL, False)
+            return self.__eval_expr(arith_ast.get("op2"))
+        elif op == '||':
+            left_value_obj = self.__eval_expr(arith_ast.get("op1"))
+            if left_value_obj.value():
+                return Value(Type.BOOL, True)
+            return self.__eval_expr(arith_ast.get("op2"))
+
         left_value_obj = self.__eval_expr(arith_ast.get("op1"))
         right_value_obj = self.__eval_expr(arith_ast.get("op2"))
         if not self.__compatible_types(
@@ -334,3 +343,28 @@ class Interpreter(InterpreterBase):
             return (ExecStatus.RETURN, Interpreter.NIL_VALUE)
         value_obj = copy.copy(self.__eval_expr(expr_ast))
         return (ExecStatus.RETURN, value_obj)
+
+def main():
+  program = """
+func foo() : int {
+  print("foo");
+  return 1;
+}
+
+func main() : void {
+  var a;
+  var b;
+  a = 1 + foo();
+  print("after a assign");
+  b = a + 1;
+  print("A: ", a);
+  print("after a evaluation");
+  print(b);
+}
+                """
+  interpreter = Interpreter()
+  interpreter.run(program)
+
+
+if __name__ == "__main__":
+    main()
