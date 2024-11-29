@@ -81,7 +81,10 @@ class Interpreter(InterpreterBase):
             status, return_val = self.__do_if(statement)
         elif statement.elem_type == Interpreter.FOR_NODE:
             status, return_val = self.__do_for(statement)
-
+        elif statement.elem_type == InterpreterBase.RAISE_NODE:
+            self.__handle_raise(statement)
+        elif statement.elem_type == InterpreterBase.TRY_NODE:
+            return self.__handle_try(statement)
         return (status, return_val)
     
     def __call_func(self, call_node): # return return_val
@@ -207,6 +210,12 @@ class Interpreter(InterpreterBase):
             if left_value_obj.value():
                 return Value(Type.BOOL, True)
             return self.__eval_expr(arith_ast.get("op2"))
+        # division by zero
+        elif op == '/':
+            right_value_obj = self.__eval_expr(arith_ast.get("op2"))
+            if right_value_obj.value() == 0:
+                raise Exception("div0")
+            return Value(Type.INT, left_value_obj.value() // right_value_obj.value())
 
         left_value_obj = self.__eval_expr(arith_ast.get("op1"))
         right_value_obj = self.__eval_expr(arith_ast.get("op2"))
@@ -461,24 +470,57 @@ class Interpreter(InterpreterBase):
 
         return return_val
 
+    def __handle_raise(self, raise_ast):
+        exception_expr = raise_ast.get("exception_type")
+        exception_value = self.__eval_expr(exception_expr)
+        if exception_value.type() != Type.STRING:
+            super().error(ErrorType.TYPE_ERROR, f"Raised exception type is not a string, it is of type: {exception_value.type()}")
+        raise Exception(exception_value.value()) # 🍅
+    
+    def __handle_try(self, try_ast):
+        try_statements = try_ast.get("statements")
+        catchers = try_ast.get("catchers")
+        try:
+            self.__run_statements(try_statements)
+        except Exception as e:
+            exception_type = str(e)
+            for catcher in catchers:
+                if catcher.get("exception_type") == exception_type: # check if exceptions match
+                    self.env.push_block() # new scope for catch clause
+                    try:
+                        self.__run_statements(catcher.get("statements"))
+                    finally:
+                        self.env.pop_block()
+                    return (ExecStatus.CONTINUE, None)
+            raise  # 🍅 if no catch matches exception type, the exception is propogated up the call stack
+
 def main():
   program = """
-func zero() {
-  print("zero");
-  return 0;
-}
-
-func inc(x) {
- print("inc:", x);
- return x + 1;
+func foo() {
+    try {
+        raise "z";
+    }
+    catch "x" {
+        print("x");
+    }
+    catch "y" {
+        print("y");
+    }
+    catch "z" {
+        print("z");
+        raise "a";
+    }
+    print("q");
 }
 
 func main() {
- var a;
- for (a = 0; zero() + a < 3; a = inc(a)) {
-   print("x");
- }
- print("d");
+    try {
+        foo();
+        print("b");
+    }
+    catch "a" {
+        print("a");
+    }
 }
                 """
   interpreter = Interpreter()
