@@ -181,9 +181,8 @@ class Interpreter(InterpreterBase):
             val_thunk = self.env.get(var_name)
             if val_thunk is None:
                 super().error(ErrorType.NAME_ERROR, f"Variable {var_name} not found")
-            if not isinstance(val_thunk, Thunk): # should always be a Thunk? 🍅
-                super().error(ErrorType.TYPE_ERROR, f"🚨 OH NOOOOO! Variable {var_name} is not of type Thunk??")
-            
+            if not isinstance(val_thunk, Thunk): # then should be a Value obj?
+                return val_thunk            
             val_thunk = self.__handle_thunk(val_thunk) # return Value Obj?
             return val_thunk
         if expr_ast.elem_type == InterpreterBase.FCALL_NODE:
@@ -429,18 +428,22 @@ class Interpreter(InterpreterBase):
 
 def main():
   program = """
-func foo() : int {
-  print("foo");
+func foo(y) : int {
+  print("foo: ", y);
+  return y;
+}
+func bar() : int {
+  print("bar");
   return 1;
 }
 
 func main() : void {
-  var x;
-  var y;
-  x = 5;
-  y = x + 10;
-  x = 100;
-  print(y); /* still prints 15 */
+  var a;
+  var b;
+  foo(3+5);
+  a = 1 + foo(bar());
+  print("done!");
+  print(a);
 }
                 """
   interpreter = Interpreter()
