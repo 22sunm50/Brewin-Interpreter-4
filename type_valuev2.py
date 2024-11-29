@@ -1,3 +1,4 @@
+import copy
 from intbase import InterpreterBase
 
 
@@ -47,3 +48,9 @@ def get_printable(val):
             return "true"
         return "false"
     return None
+
+class Thunk:
+    def __init__(self, expr_ast, curr_dict):
+        self.expr_ast = expr_ast  # expr AST that computes the value
+        self.copied_env = curr_dict  # shallow copy of current scope dict
+        self.is_evaluated = False  # flag to check if value has been computed

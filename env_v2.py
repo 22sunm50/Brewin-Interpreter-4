@@ -1,5 +1,7 @@
 # The EnvironmentManager class keeps a mapping between each variable name (aka symbol)
 # in a brewin program and the Value object, which stores a type, and a value.
+import copy
+
 class EnvironmentManager:
     def __init__(self):
         self.environment = []

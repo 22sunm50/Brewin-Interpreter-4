@@ -6,7 +6,7 @@ from enum import Enum
 from brewparse import parse_program
 from env_v2 import EnvironmentManager
 from intbase import InterpreterBase, ErrorType
-from type_valuev2 import Type, Value, create_value, get_printable
+from type_valuev2 import Type, Value, create_value, get_printable, Thunk
 
 
 class ExecStatus(Enum):
@@ -53,7 +53,7 @@ class Interpreter(InterpreterBase):
             )
         return candidate_funcs[num_params]
 
-    def __run_statements(self, statements):
+    def __run_statements(self, statements): # return (status, return_val) of a func
         self.env.push_block()
         for statement in statements:
             if self.trace_output:
@@ -66,7 +66,7 @@ class Interpreter(InterpreterBase):
         self.env.pop_block()
         return (ExecStatus.CONTINUE, Interpreter.NIL_VALUE)
 
-    def __run_statement(self, statement):
+    def __run_statement(self, statement): # return (status, return_val) of a func
         status = ExecStatus.CONTINUE
         return_val = None
         if statement.elem_type == InterpreterBase.FCALL_NODE:
@@ -84,12 +84,12 @@ class Interpreter(InterpreterBase):
 
         return (status, return_val)
     
-    def __call_func(self, call_node):
+    def __call_func(self, call_node): # return return_val
         func_name = call_node.get("name")
         actual_args = call_node.get("args")
         return self.__call_func_aux(func_name, actual_args)
 
-    def __call_func_aux(self, func_name, actual_args):
+    def __call_func_aux(self, func_name, actual_args): # return return_val
         if func_name == "print":
             return self.__call_print(actual_args)
         if func_name == "inputi" or func_name == "inputs":
@@ -119,15 +119,16 @@ class Interpreter(InterpreterBase):
         self.env.pop_func()
         return return_val
 
-    def __call_print(self, args):
+    def __call_print(self, args): # return nil
         output = ""
         for arg in args:
-            result = self.__eval_expr(arg)  # result is a Value object
+            # eager eval
+            result = self.__eval_expr(arg)  # result could be Thunk or Value object
             output = output + get_printable(result)
         super().output(output)
         return Interpreter.NIL_VALUE
 
-    def __call_input(self, name, args):
+    def __call_input(self, name, args): # return Value object
         if args is not None and len(args) == 1:
             result = self.__eval_expr(args[0])
             super().output(get_printable(result))
@@ -141,22 +142,32 @@ class Interpreter(InterpreterBase):
         if name == "inputs":
             return Value(Type.STRING, inp)
 
-    def __assign(self, assign_ast):
+    def __assign(self, assign_ast): # no return
         var_name = assign_ast.get("name")
-        value_obj = self.__eval_expr(assign_ast.get("expression"))
-        if not self.env.set(var_name, value_obj):
+        expr_ast = assign_ast.get("expression")
+
+        curr_dict = copy.copy(self.env) # create a shallow copy of the curr env dict
+        # Create a new environment structure where each list and dictionary is shallow-copied
+        curr_dict.environment = [
+            [copy.copy(env) for env in func_env] for func_env in self.env.environment
+        ]
+           
+        # create thunk
+        thunk_obj = Thunk(expr_ast, curr_dict)
+        # set thunk to dict
+        if not self.env.set(var_name, thunk_obj):
             super().error(
                 ErrorType.NAME_ERROR, f"Undefined variable {var_name} in assignment"
             )
     
-    def __var_def(self, var_ast):
+    def __var_def(self, var_ast): # no return
         var_name = var_ast.get("name")
         if not self.env.create(var_name, Interpreter.NIL_VALUE):
             super().error(
                 ErrorType.NAME_ERROR, f"Duplicate definition for variable {var_name}"
             )
 
-    def __eval_expr(self, expr_ast):
+    def __eval_expr(self, expr_ast): # return Value Object
         if expr_ast.elem_type == InterpreterBase.NIL_NODE:
             return Interpreter.NIL_VALUE
         if expr_ast.elem_type == InterpreterBase.INT_NODE:
@@ -167,10 +178,14 @@ class Interpreter(InterpreterBase):
             return Value(Type.BOOL, expr_ast.get("val"))
         if expr_ast.elem_type == InterpreterBase.VAR_NODE:
             var_name = expr_ast.get("name")
-            val = self.env.get(var_name)
-            if val is None:
+            val_thunk = self.env.get(var_name)
+            if val_thunk is None:
                 super().error(ErrorType.NAME_ERROR, f"Variable {var_name} not found")
-            return val
+            if not isinstance(val_thunk, Thunk): # should always be a Thunk? 🍅
+                super().error(ErrorType.TYPE_ERROR, f"🚨 OH NOOOOO! Variable {var_name} is not of type Thunk??")
+            
+            val_thunk = self.__handle_thunk(val_thunk) # return Value Obj?
+            return val_thunk
         if expr_ast.elem_type == InterpreterBase.FCALL_NODE:
             return self.__call_func(expr_ast)
         if expr_ast.elem_type in Interpreter.BIN_OPS:
@@ -180,8 +195,9 @@ class Interpreter(InterpreterBase):
         if expr_ast.elem_type == Interpreter.NOT_NODE:
             return self.__eval_unary(expr_ast, Type.BOOL, lambda x: not x)
 
-    def __eval_op(self, arith_ast):
+    def __eval_op(self, arith_ast): # return Value Object
         op = arith_ast.elem_type
+        # short circuiting
         if op  == '&&':
             left_value_obj = self.__eval_expr(arith_ast.get("op1"))
             if not left_value_obj.value():
@@ -210,13 +226,13 @@ class Interpreter(InterpreterBase):
         f = self.op_to_lambda[left_value_obj.type()][arith_ast.elem_type]
         return f(left_value_obj, right_value_obj)
 
-    def __compatible_types(self, oper, obj1, obj2):
+    def __compatible_types(self, oper, obj1, obj2): # return Bool
         # DOCUMENT: allow comparisons ==/!= of anything against anything
         if oper in ["==", "!="]:
             return True
         return obj1.type() == obj2.type()
 
-    def __eval_unary(self, arith_ast, t, f):
+    def __eval_unary(self, arith_ast, t, f): # return Value Object
         value_obj = self.__eval_expr(arith_ast.get("op1"))
         if value_obj.type() != t:
             super().error(
@@ -225,7 +241,7 @@ class Interpreter(InterpreterBase):
             )
         return Value(t, f(value_obj.value()))
 
-    def __setup_ops(self):
+    def __setup_ops(self): # no return
         self.op_to_lambda = {}
         # set up operations on integers
         self.op_to_lambda[Type.INT] = {}
@@ -294,7 +310,7 @@ class Interpreter(InterpreterBase):
             Type.BOOL, x.type() != y.type() or x.value() != y.value()
         )
 
-    def __do_if(self, if_ast):
+    def __do_if(self, if_ast): # return (status, return_val)
         cond_ast = if_ast.get("condition")
         result = self.__eval_expr(cond_ast)
         if result.type() != Type.BOOL:
@@ -343,6 +359,73 @@ class Interpreter(InterpreterBase):
             return (ExecStatus.RETURN, Interpreter.NIL_VALUE)
         value_obj = copy.copy(self.__eval_expr(expr_ast))
         return (ExecStatus.RETURN, value_obj)
+    
+    def __handle_thunk(self, thunk_obj): # return a Value Object        
+        if not thunk_obj.is_evaluated:
+            thunk_obj.expr_ast = self.__eval_expr_thunk(thunk_obj.expr_ast, thunk_obj.copied_env)
+            thunk_obj.is_evaluated = True
+        return thunk_obj.expr_ast
+    
+    def __eval_expr_thunk(self, expr_ast, thunk_env):
+        if expr_ast.elem_type == InterpreterBase.NIL_NODE:
+            return Interpreter.NIL_VALUE
+        if expr_ast.elem_type == InterpreterBase.INT_NODE:
+            return Value(Type.INT, expr_ast.get("val"))
+        if expr_ast.elem_type == InterpreterBase.STRING_NODE:
+            return Value(Type.STRING, expr_ast.get("val"))
+        if expr_ast.elem_type == InterpreterBase.BOOL_NODE:
+            return Value(Type.BOOL, expr_ast.get("val"))
+        if expr_ast.elem_type == InterpreterBase.VAR_NODE:
+            var_name = expr_ast.get("name") # gets var from the Thunk's expr_ast
+            val_thunk = thunk_env.get(var_name) # gets Thunk of var
+            if val_thunk is None: # had not been initiated prior to thunk creation
+                super().error(ErrorType.NAME_ERROR, f"Variable {var_name} not found")
+            # val_thunk = val_thunk.copied_env.get(var_name) # get the var stored in copied env
+            
+            if isinstance(val_thunk, Thunk): # if var in copied_env is another Thunk
+                val_thunk = self.__handle_thunk(val_thunk)
+            return val_thunk
+        if expr_ast.elem_type == InterpreterBase.FCALL_NODE:
+            return self.__call_func(expr_ast)
+        if expr_ast.elem_type in Interpreter.BIN_OPS:
+            return self.__eval_op_thunk(expr_ast, thunk_env) # 🍅
+        if expr_ast.elem_type == Interpreter.NEG_NODE:
+            return self.__eval_unary(expr_ast, Type.INT, lambda x: -1 * x)
+        if expr_ast.elem_type == Interpreter.NOT_NODE:
+            return self.__eval_unary(expr_ast, Type.BOOL, lambda x: not x)
+        
+    def __eval_op_thunk(self, expr_ast, thunk_env): # return Value Object
+        op = expr_ast.elem_type
+        op1 = expr_ast.get("op1")
+        op2 = expr_ast.get("op2")
+        # short circuiting
+        if op  == '&&':
+            left_value_obj = self.__eval_expr_thunk(op1, thunk_env)
+            if not left_value_obj.value():
+                return Value(Type.BOOL, False)
+            return self.__eval_expr_thunk(op2, thunk_env)
+        elif op == '||':
+            left_value_obj = self.__eval_expr_thunk(op1, thunk_env)
+            if left_value_obj.value():
+                return Value(Type.BOOL, True)
+            return self.__eval_expr_thunk(op2, thunk_env)
+
+        left_value_obj = self.__eval_expr_thunk(op1, thunk_env)
+        right_value_obj = self.__eval_expr_thunk(op2, thunk_env)
+        if not self.__compatible_types(
+            expr_ast.elem_type, left_value_obj, right_value_obj
+        ):
+            super().error(
+                ErrorType.TYPE_ERROR,
+                f"Incompatible types for {expr_ast.elem_type} operation",
+            )
+        if expr_ast.elem_type not in self.op_to_lambda[left_value_obj.type()]:
+            super().error(
+                ErrorType.TYPE_ERROR,
+                f"Incompatible operator {expr_ast.elem_type} for type {left_value_obj.type()}",
+            )
+        f = self.op_to_lambda[left_value_obj.type()][expr_ast.elem_type]
+        return f(left_value_obj, right_value_obj)
 
 def main():
   program = """
@@ -352,14 +435,12 @@ func foo() : int {
 }
 
 func main() : void {
-  var a;
-  var b;
-  a = 1 + foo();
-  print("after a assign");
-  b = a + 1;
-  print("A: ", a);
-  print("after a evaluation");
-  print(b);
+  var x;
+  var y;
+  x = 5;
+  y = x + 10;
+  x = 100;
+  print(y); /* still prints 15 */
 }
                 """
   interpreter = Interpreter()
