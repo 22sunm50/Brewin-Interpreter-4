@@ -385,7 +385,8 @@ class Interpreter(InterpreterBase):
                 val_thunk = self.__handle_thunk(val_thunk)
             return val_thunk
         if expr_ast.elem_type == InterpreterBase.FCALL_NODE:
-            return self.__call_func(expr_ast)
+            # return self.__call_func(expr_ast)
+            return self.__call_func_thunk(expr_ast, thunk_env)
         if expr_ast.elem_type in Interpreter.BIN_OPS:
             return self.__eval_op_thunk(expr_ast, thunk_env) # 🍅
         if expr_ast.elem_type == Interpreter.NEG_NODE:
@@ -425,25 +426,59 @@ class Interpreter(InterpreterBase):
             )
         f = self.op_to_lambda[left_value_obj.type()][expr_ast.elem_type]
         return f(left_value_obj, right_value_obj)
+    
+    def __call_func_thunk(self, call_node, thunk_env): # return return_val
+        func_name = call_node.get("name")
+        actual_args = call_node.get("args")
+
+        if func_name == "print":
+            return self.__call_print(actual_args)
+        if func_name == "inputi" or func_name == "inputs":
+            return self.__call_input(func_name, actual_args)
+
+        func_ast = self.__get_func_by_name(func_name, len(actual_args))
+        formal_args = func_ast.get("args")
+        if len(actual_args) != len(formal_args):
+            super().error(
+                ErrorType.NAME_ERROR,
+                f"Function {func_ast.get('name')} with {len(actual_args)} args not found",
+            )
+
+        # Evaluate actual parameters using the thunk_env
+        args = {}
+        for formal_ast, actual_ast in zip(formal_args, actual_args):
+            result = self.__eval_expr_thunk(actual_ast, thunk_env)  # Evaluate lazily
+            arg_name = formal_ast.get("name")
+            args[arg_name] = result
+
+        # Push a new function environment
+        self.env.push_func()
+        for arg_name, value in args.items():
+            self.env.create(arg_name, value)
+
+        _, return_val = self.__run_statements(func_ast.get("statements"))
+        self.env.pop_func()
+
+        return return_val
 
 def main():
   program = """
-func foo(y) : int {
-  print("foo: ", y);
-  return y;
-}
-func bar() : int {
-  print("bar");
-  return 1;
+func zero() {
+  print("zero");
+  return 0;
 }
 
-func main() : void {
-  var a;
-  var b;
-  foo(3+5);
-  a = 1 + foo(bar());
-  print("done!");
-  print(a);
+func inc(x) {
+ print("inc:", x);
+ return x + 1;
+}
+
+func main() {
+ var a;
+ for (a = 0; zero() + a < 3; a = inc(a)) {
+   print("x");
+ }
+ print("d");
 }
                 """
   interpreter = Interpreter()
