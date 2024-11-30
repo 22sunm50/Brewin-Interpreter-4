@@ -484,34 +484,57 @@ class Interpreter(InterpreterBase):
         try_statements = try_ast.get("statements")
         catchers = try_ast.get("catchers")
         try:
-            self.__run_statements(try_statements)
+            # self.__run_statements(try_statements)
+            status, return_val = self.__run_statements(try_statements)
+            return status, return_val # ensure tuple is returned
         except Exception as e:
             exception_type = str(e)
             for catcher in catchers:
                 if catcher.get("exception_type") == exception_type: # check if exceptions match
                     self.env.push_block() # new scope for catch clause
                     try:
-                        self.__run_statements(catcher.get("statements"))
+                        # self.__run_statements(catcher.get("statements"))
+                        status, return_val = self.__run_statements(catcher.get("statements"))
+                        return status, return_val
                     finally:
                         self.env.pop_block()
-                    return (ExecStatus.CONTINUE, None)
             raise  # 🍅 if no catch matches exception type, the exception is propogated up the call stack
+        return (ExecStatus.CONTINUE, None) # default return if no exception occurs # 🍅 UNREACHABLE
 
 def main():
   program = """
-func f(x) {
-  print("running f");
-  return g(5) + 3;
+func try_ret(a) {
+  print("t_ret");
+  try {
+    return a * 2;
+  }
+  catch "A" {
+    raise "B";
+  }
+  print("must not print");
 }
 
-func g(x) {
-  print("running g");
-  return x;
+func catch_ret(a) {
+  print("c_ret");
+  try {
+    raise "A";
+  }
+  catch "A" {
+    return a + "_is_bestagon";
+    raise "B";
+  }
+  print("must not print");
 }
 
 func main() {
-    f(3);
-    print("end");
+  var x;
+  var y;
+  x = try_ret(3);
+  y = catch_ret("_hexagon");
+  print("---");
+  print(x, y);
+  print(try_ret(3), catch_ret("_hexagon"));
+  print(x, y);
 }
                 """
   interpreter = Interpreter()
