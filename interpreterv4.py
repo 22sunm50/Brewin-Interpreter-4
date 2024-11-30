@@ -109,9 +109,10 @@ class Interpreter(InterpreterBase):
         # first evaluate all of the actual parameters and associate them with the formal parameter names
         args = {}
         for formal_ast, actual_ast in zip(formal_args, actual_args):
-            result = copy.copy(self.__eval_expr(actual_ast))
+            thunk = Thunk(actual_ast, copy.copy(self.env))
+            # result = copy.copy(self.__eval_expr(actual_ast))
             arg_name = formal_ast.get("name")
-            args[arg_name] = result
+            args[arg_name] = thunk
 
         # then create the new activation record 
         self.env.push_func()
@@ -365,6 +366,7 @@ class Interpreter(InterpreterBase):
         expr_ast = return_ast.get("expression")
         if expr_ast is None:
             return (ExecStatus.RETURN, Interpreter.NIL_VALUE)
+        
         value_obj = copy.copy(self.__eval_expr(expr_ast))
         return (ExecStatus.RETURN, value_obj)
     
@@ -456,9 +458,10 @@ class Interpreter(InterpreterBase):
         # Evaluate actual parameters using the thunk_env
         args = {}
         for formal_ast, actual_ast in zip(formal_args, actual_args):
-            result = self.__eval_expr_thunk(actual_ast, thunk_env)  # Evaluate lazily
+            thunk = Thunk(actual_ast, copy.copy(thunk_env)) # 🍅 think about later: do I need to copy further? 
+            # result = self.__eval_expr_thunk(actual_ast, thunk_env)  # Evaluate lazily
             arg_name = formal_ast.get("name")
-            args[arg_name] = result
+            args[arg_name] = thunk
 
         # Push a new function environment
         self.env.push_func()
@@ -496,31 +499,19 @@ class Interpreter(InterpreterBase):
 
 def main():
   program = """
-func foo() {
-    try {
-        raise "z";
-    }
-    catch "x" {
-        print("x");
-    }
-    catch "y" {
-        print("y");
-    }
-    catch "z" {
-        print("z");
-        raise "a";
-    }
-    print("q");
+func f(x) {
+  print("running f");
+  return g(5) + 3;
+}
+
+func g(x) {
+  print("running g");
+  return x;
 }
 
 func main() {
-    try {
-        foo();
-        print("b");
-    }
-    catch "a" {
-        print("a");
-    }
+    f(3);
+    print("end");
 }
                 """
   interpreter = Interpreter()
