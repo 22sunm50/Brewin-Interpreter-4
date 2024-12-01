@@ -155,11 +155,9 @@ class Interpreter(InterpreterBase):
         expr_ast = assign_ast.get("expression")
 
         curr_dict = copy.copy(self.env) # create a shallow copy of the curr env dict
-        # Create a new environment structure where each list and dictionary is shallow-copied
-        curr_dict.environment = [
+        curr_dict.environment = [ # create a new environment structure where each list and dictionary is shallow-copied
             [copy.copy(env) for env in func_env] for func_env in self.env.environment
         ]
-           
         # create thunk
         thunk_obj = Thunk(expr_ast, curr_dict)
         # set thunk to dict
@@ -348,20 +346,30 @@ class Interpreter(InterpreterBase):
         update_ast = for_ast.get("update") 
 
         self.__run_statement(init_ast)  # initialize counter variable
-        run_for = Interpreter.TRUE_VALUE
-        while run_for.value():
-            run_for = self.__eval_expr(cond_ast)  # check for-loop condition
-            if run_for.type() != Type.BOOL:
-                super().error(
-                    ErrorType.TYPE_ERROR,
-                    "Incompatible type for for condition",
-                )
-            if run_for.value():
-                statements = for_ast.get("statements")
-                status, return_val = self.__run_statements(statements)
+        # run_for = Interpreter.TRUE_VALUE
+        # while run_for.value():
+        #     run_for = self.__eval_expr(cond_ast)  # check for-loop condition
+        #     if run_for.type() != Type.BOOL:
+        #         super().error(
+        #             ErrorType.TYPE_ERROR,
+        #             "Incompatible type for for condition",
+        #         )
+        #     if run_for.value():
+        #         statements = for_ast.get("statements")
+        #         status, return_val = self.__run_statements(statements)
+        #         if status == ExecStatus.RETURN:
+        #             return status, return_val
+        #         self.__run_statement(update_ast)  # update counter variable
+
+        while self.__eval_expr(cond_ast).value():
+            self.env.push_block()  # Create a new scope for each iteration
+            try:
+                status, return_val = self.__run_statements(for_ast.get("statements"))
                 if status == ExecStatus.RETURN:
                     return status, return_val
-                self.__run_statement(update_ast)  # update counter variable
+            finally:
+                self.env.pop_block()  # Ensure the block is always popped
+            self.__run_statement(update_ast)  # Update counter variable
 
         return (ExecStatus.CONTINUE, Interpreter.NIL_VALUE)
 
@@ -484,15 +492,19 @@ class Interpreter(InterpreterBase):
         raise UserException(exception_value.value()) # 🍅
     
     def __handle_try(self, try_ast):
+        did_it_pop = False
         try_statements = try_ast.get("statements")
         catchers = try_ast.get("catchers")
-        self.env.push_block()
         try:
+            self.env.push_block()
             # self.__run_statements(try_statements)
             status, return_val = self.__run_statements(try_statements)
             self.env.pop_block()
+            did_it_pop = True
             return status, return_val # ensure tuple is returned
         except UserException as e:
+            if not did_it_pop:
+                self.env.pop_block()
             self.env.push_block()
             exception_type = str(e)
             for catcher in catchers:
@@ -508,37 +520,52 @@ class Interpreter(InterpreterBase):
 
 def main():
   program = """
-func foo() {
-  print("F1");
-  raise "except1";
-  print("F3");
-}
-
-func bar() {
-  try {
-    print("B1");
-    foo();
-    print("B2");
-  }
-  catch "except2" {
-    print("B3");
-  }
-  print("B4");
-}
-
 func main() {
+  var a;
+  a = 45;
+  print(a);
   try {
-    print("M1");
-    bar();
-    print("M2");
+    var a;
+    a = "first try";
+    print(a);
+    try {
+      var a;
+      a = "second try";
+      print(a);
+      try {
+        var a;
+        a = "third try";
+        print(a);
+        if (true) {
+          var a;
+          for (a = ""; a != "00000"; a = a + "0") {
+            print(a);
+            if (a == "000") {
+              raise "E1";
+            }
+            var a;
+            a = "for body scope";
+            print(a);
+          }
+        }
+      }
+      catch "E1" {
+        print(a);
+        raise "E2";
+      }
+    }
+    catch "E2" {
+      print(a);
+      raise "E3";
+    }
   }
-  catch "except1" {
-    print("M3");
+  catch "E3" {
+    print(a);
+    var a;
+    a = nil;
+    print(a != nil);
   }
-  catch "except3" {
-    print("M4");
-  }
-  print("M5");
+  print(a);
 }
                 """
   interpreter = Interpreter()
