@@ -54,3 +54,11 @@ class Thunk:
         self.expr_ast = expr_ast  # expr AST that computes the value
         self.copied_env = curr_dict  # shallow copy of current scope dict
         self.is_evaluated = False  # flag to check if value has been computed
+
+class UserException(Exception):
+    def __init__(self, message):
+        super().__init__(message)
+        self.message = message
+
+    def __str__(self):
+        return self.message

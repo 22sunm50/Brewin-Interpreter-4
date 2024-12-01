@@ -6,7 +6,7 @@ from enum import Enum
 from brewparse import parse_program
 from env_v2 import EnvironmentManager
 from intbase import InterpreterBase, ErrorType
-from type_valuev2 import Type, Value, create_value, get_printable, Thunk
+from type_valuev2 import Type, Value, create_value, get_printable, Thunk, UserException
 
 
 class ExecStatus(Enum):
@@ -28,10 +28,15 @@ class Interpreter(InterpreterBase):
         self.__setup_ops()
 
     def run(self, program):
-        ast = parse_program(program)
-        self.__set_up_function_table(ast)
-        self.env = EnvironmentManager()
-        self.__call_func_aux("main", [])
+        try:
+            ast = parse_program(program)
+            self.__set_up_function_table(ast)
+            self.env = EnvironmentManager()
+            self.__call_func_aux("main", [])
+        except UserException as e:
+            self.error(ErrorType.FAULT_ERROR, f"Unhandled user-defined exception: {str(e)}")
+        except Exception as e:
+            raise # re-raise the exception for regular errors
 
     def __set_up_function_table(self, ast):
         self.func_name_to_ast = {}
@@ -62,7 +67,6 @@ class Interpreter(InterpreterBase):
             if status == ExecStatus.RETURN:
                 self.env.pop_block()
                 return (status, return_val)
-
         self.env.pop_block()
         return (ExecStatus.CONTINUE, Interpreter.NIL_VALUE)
 
@@ -211,15 +215,14 @@ class Interpreter(InterpreterBase):
             if left_value_obj.value():
                 return Value(Type.BOOL, True)
             return self.__eval_expr(arith_ast.get("op2"))
-        # division by zero
-        elif op == '/':
-            right_value_obj = self.__eval_expr(arith_ast.get("op2"))
-            if right_value_obj.value() == 0:
-                raise Exception("div0")
-            return Value(Type.INT, left_value_obj.value() // right_value_obj.value())
 
         left_value_obj = self.__eval_expr(arith_ast.get("op1"))
         right_value_obj = self.__eval_expr(arith_ast.get("op2"))
+
+        # division by zero check (after evaluating both sides)
+        if op == '/' and right_value_obj.value() == 0:
+            raise UserException("div0")  # Custom exception for division by zero
+
         if not self.__compatible_types(
             arith_ast.elem_type, left_value_obj, right_value_obj
         ):
@@ -478,16 +481,19 @@ class Interpreter(InterpreterBase):
         exception_value = self.__eval_expr(exception_expr)
         if exception_value.type() != Type.STRING:
             super().error(ErrorType.TYPE_ERROR, f"Raised exception type is not a string, it is of type: {exception_value.type()}")
-        raise Exception(exception_value.value()) # 🍅
+        raise UserException(exception_value.value()) # 🍅
     
     def __handle_try(self, try_ast):
         try_statements = try_ast.get("statements")
         catchers = try_ast.get("catchers")
+        self.env.push_block()
         try:
             # self.__run_statements(try_statements)
             status, return_val = self.__run_statements(try_statements)
+            self.env.pop_block()
             return status, return_val # ensure tuple is returned
-        except Exception as e:
+        except UserException as e:
+            self.env.push_block()
             exception_type = str(e)
             for catcher in catchers:
                 if catcher.get("exception_type") == exception_type: # check if exceptions match
@@ -498,43 +504,41 @@ class Interpreter(InterpreterBase):
                         return status, return_val
                     finally:
                         self.env.pop_block()
-            raise  # 🍅 if no catch matches exception type, the exception is propogated up the call stack
-        return (ExecStatus.CONTINUE, None) # default return if no exception occurs # 🍅 UNREACHABLE
+            raise e # 🍅 if no matching catch block is found, re-raise the exception
 
 def main():
   program = """
-func try_ret(a) {
-  print("t_ret");
-  try {
-    return a * 2;
-  }
-  catch "A" {
-    raise "B";
-  }
-  print("must not print");
+func foo() {
+  print("F1");
+  raise "except1";
+  print("F3");
 }
 
-func catch_ret(a) {
-  print("c_ret");
+func bar() {
   try {
-    raise "A";
+    print("B1");
+    foo();
+    print("B2");
   }
-  catch "A" {
-    return a + "_is_bestagon";
-    raise "B";
+  catch "except2" {
+    print("B3");
   }
-  print("must not print");
+  print("B4");
 }
 
 func main() {
-  var x;
-  var y;
-  x = try_ret(3);
-  y = catch_ret("_hexagon");
-  print("---");
-  print(x, y);
-  print(try_ret(3), catch_ret("_hexagon"));
-  print(x, y);
+  try {
+    print("M1");
+    bar();
+    print("M2");
+  }
+  catch "except1" {
+    print("M3");
+  }
+  catch "except3" {
+    print("M4");
+  }
+  print("M5");
 }
                 """
   interpreter = Interpreter()
