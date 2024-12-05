@@ -1,0 +1,47 @@
+func main() {
+    var a;
+    a = 45;
+    print(a);
+    try {
+        var a;
+        a = "first try";
+        print(a);
+        try {
+            var a;
+            a = "second try";
+            print(a);
+            try {
+                var a;
+                a = "third try";
+                print(a);
+                if (true) {
+                    var a;
+                    for (a = ""; a != "00000"; a = a + "0") {
+                        print(a);
+                        if (a == "000") {
+                            raise "E1";
+                        }
+                        var a;
+                        a = "for body scope";
+                        print(a);
+                    }
+                }
+            }
+            catch "E1" {
+                print(a); /* second try */
+                raise "E2";
+            }
+        }
+        catch "E2" {
+            print(a); /* first try */
+            raise "E3";
+        }
+    }
+    catch "E3" {
+        print(a); /* 45 */
+        var a;
+        a = nil;
+        print(a != nil); /* false */
+    }
+    print(a); /* 45 */
+}

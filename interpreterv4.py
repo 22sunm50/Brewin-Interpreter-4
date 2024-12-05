@@ -112,9 +112,12 @@ class Interpreter(InterpreterBase):
 
         # first evaluate all of the actual parameters and associate them with the formal parameter names
         args = {}
+        curr_dict = copy.copy(self.env) # create a shallow copy of the curr env dict
+        curr_dict.environment = [ # create a new environment structure where each list and dictionary is shallow-copied
+            [copy.copy(env) for env in func_env] for func_env in self.env.environment
+        ]
         for formal_ast, actual_ast in zip(formal_args, actual_args):
-            thunk = Thunk(actual_ast, copy.copy(self.env))
-            # result = copy.copy(self.__eval_expr(actual_ast))
+            thunk = Thunk(actual_ast, curr_dict)
             arg_name = formal_ast.get("name")
             args[arg_name] = thunk
 
@@ -122,7 +125,7 @@ class Interpreter(InterpreterBase):
         self.env.push_func()
         # and add the formal arguments to the activation record
         for arg_name, value in args.items():
-          self.env.create(arg_name, value)
+            self.env.create(arg_name, value)
         _, return_val = self.__run_statements(func_ast.get("statements"))
         self.env.pop_func()
         return return_val
@@ -130,7 +133,6 @@ class Interpreter(InterpreterBase):
     def __call_print(self, args): # return nil
         output = ""
         for arg in args:
-            # eager eval
             result = self.__eval_expr(arg)  # result could be Thunk or Value object
             output = output + get_printable(result)
         super().output(output)
@@ -188,7 +190,7 @@ class Interpreter(InterpreterBase):
             if val_thunk is None:
                 super().error(ErrorType.NAME_ERROR, f"Variable {var_name} not found")
             if not isinstance(val_thunk, Thunk): # then should be a Value obj?
-                return val_thunk            
+                return val_thunk    
             val_thunk = self.__handle_thunk(val_thunk) # return Value Obj?
             return val_thunk
         if expr_ast.elem_type == InterpreterBase.FCALL_NODE:
@@ -401,13 +403,11 @@ class Interpreter(InterpreterBase):
             val_thunk = thunk_env.get(var_name) # gets Thunk of var
             if val_thunk is None: # had not been initiated prior to thunk creation
                 super().error(ErrorType.NAME_ERROR, f"Variable {var_name} not found")
-            # val_thunk = val_thunk.copied_env.get(var_name) # get the var stored in copied env
             
             if isinstance(val_thunk, Thunk): # if var in copied_env is another Thunk
                 val_thunk = self.__handle_thunk(val_thunk)
             return val_thunk
         if expr_ast.elem_type == InterpreterBase.FCALL_NODE:
-            # return self.__call_func(expr_ast)
             return self.__call_func_thunk(expr_ast, thunk_env)
         if expr_ast.elem_type in Interpreter.BIN_OPS:
             return self.__eval_op_thunk(expr_ast, thunk_env) # 🍅
@@ -520,53 +520,27 @@ class Interpreter(InterpreterBase):
 
 def main():
   program = """
-func main() {
-  var a;
-  a = 45;
-  print(a);
-  try {
-    var a;
-    a = "first try";
-    print(a);
-    try {
-      var a;
-      a = "second try";
-      print(a);
-      try {
-        var a;
-        a = "third try";
-        print(a);
-        if (true) {
-          var a;
-          for (a = ""; a != "00000"; a = a + "0") {
-            print(a);
-            if (a == "000") {
-              raise "E1";
-            }
-            var a;
-            a = "for body scope";
-            print(a);
-          }
-        }
-      }
-      catch "E1" {
-        print(a);
-        raise "E2";
-      }
-    }
-    catch "E2" {
-      print(a);
-      raise "E3";
-    }
-  }
-  catch "E3" {
-    print(a);
-    var a;
-    a = nil;
-    print(a != nil);
-  }
-  print(a);
+func foo(a) {
+  print("a: ", a);
+  return a + 1;
 }
+
+func bar(b) {
+  print(b);
+}
+
+func main() {
+  var x;
+  x = foo(5);
+  bar(x);
+}
+
+/*
+*OUT*
+a: 5
+6
+*OUT*
+*/
                 """
   interpreter = Interpreter()
   interpreter.run(program)
